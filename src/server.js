@@ -1,4 +1,4 @@
-import { Telegraf, Markup } from "telegraf";
+import { Telegraf, Markup, session } from "telegraf";
 import { message } from "telegraf/filters";
 import axios from "axios";
 import dotenv from "dotenv";
@@ -7,10 +7,13 @@ dotenv.config();
 
 const token = process.env.BOT_TOKEN
 const bot = new Telegraf(token)
-
+bot.use(session());
 const countdowns = [
     { "name": "Chelsea", "date": "2026-01-25" }
 ]
+
+let step = "";
+let ctdn = {};
 
 bot.start((ctx) => {
     const welcome = `Hi ${ctx.chat.first_name}! I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
@@ -27,6 +30,7 @@ bot.start((ctx) => {
             ["ℹ️ About"]
         ]).resize()
     );
+    console.log(ctx.message.text)
 })
 
 bot.hears(/Show me my countdowns/, (ctx) => {
@@ -34,7 +38,7 @@ bot.hears(/Show me my countdowns/, (ctx) => {
     countdowns.forEach((cntdn, i) => {
         let delta = Date.parse(cntdn.date) - Date.now()
         const MS_PER_DAY = 1000 * 60 * 60 * 24;
-        
+
         if (delta > 0) {
             const days = Math.ceil(Math.abs(delta) / MS_PER_DAY);
             delta = `${days} days left`
@@ -62,8 +66,55 @@ bot.hears(/Show me my countdowns/, (ctx) => {
 });
 
 bot.hears(/Add countdown/, (ctx) => {
-    ctx.reply("hello there");
+    step = "Add Name"
+    ctx.reply("Send me the name of your countdown");
 });
+
+bot.on(message("text"), (ctx) => {
+
+    if (step === "Add Name") {
+        ctdn.name = ctx.message.text;
+        step = "Add Date";
+
+        ctx.reply(
+            `Now send me the date (YYYY-MM-DD), e.g. ${new Date().toISOString().slice(0, 10)}`
+        );
+        return;
+    }
+
+    if (step === "Add Date") {
+        const dateStr = ctx.message.text;
+        const target = Date.parse(dateStr);
+        if (isNaN(target)) {
+            ctx.reply("❌ Invalid date. Use YYYY-MM-DD");
+            return;
+        }
+        ctdn.date = dateStr;
+
+        const delta = target - Date.now();
+        const MS_PER_DAY = 86400000;
+
+        let result;
+        if (delta > 0) {
+            result = `${Math.ceil(delta / MS_PER_DAY)} days left`;
+        } else if (delta < -MS_PER_DAY) {
+            result = `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
+        } else {
+            result = "🎉 IT'S TODAY!";
+        }
+
+        ctx.reply(
+            `${ctdn.name}\n(${dateStr})\n${result}`
+        );
+
+        countdowns.push(ctdn);
+
+        // cleanup
+        step = "";
+        ctdn = {};
+    }
+});
+
 
 bot.hears(/Edit countdown/, (ctx) => {
     ctx.reply("hello there");
