@@ -1,6 +1,5 @@
 import { Telegraf, Markup, session } from "telegraf";
 import { message } from "telegraf/filters";
-import axios from "axios";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -8,12 +7,14 @@ dotenv.config();
 const token = process.env.BOT_TOKEN
 const bot = new Telegraf(token)
 bot.use(session());
-const countdowns = [
-    { "name": "Chelsea", "date": "2026-01-25" }
+let countdowns = [
+    { "name": "Chelsea", "date": "2026-01-25" },
+    { "name": "Galatasaray", "date": "2026-01-30" }
 ]
 
 let step = "";
 let ctdn = {};
+let selectedCountdown = ""
 
 bot.start((ctx) => {
     const welcome = `Hi ${ctx.chat.first_name}! I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
@@ -48,26 +49,56 @@ bot.hears(/Show me my countdowns/, (ctx) => {
         } else {
             delta = "IT'S TODAY!"
         }
-        countdownMsg += `${cntdn.name}\n(${cntdn.date}) \n${delta}\n`
+        countdownMsg += `${cntdn.name}\n(${cntdn.date}) \n${delta}\n\n`
     })
-    ctx.reply(
-        countdownMsg,
-        Markup.keyboard([
-            ["⏰ Show me my countdowns"],
-            ["➕ Add countdown"],
-            ["✏️ Edit countdown"],
-            ["❌ Remove countdown"],
-            ["☑️ Enable daily reminders"],
-            ["🛠 Options"],
-            ["🇬🇧 Change language"],
-            ["ℹ️ About"]
-        ]).resize()
-    );
+    ctx.reply(countdownMsg);
 });
 
 bot.hears(/Add countdown/, (ctx) => {
     step = "Add Name"
-    ctx.reply("Send me the name of your countdown");
+    ctx.reply("Send me the name of your countdown:");
+});
+
+bot.hears(/Edit countdown/, (ctx) => {
+    let keyboards = []
+    countdowns.forEach((countdown, i) => {
+        keyboards.push([countdown.name + ", " + countdown.date])
+    })
+
+    ctx.reply(
+        "Which countdown do you want to edit?",
+        Markup.keyboard(keyboards).resize()
+    );
+    step = "Choose countdown"
+});
+
+bot.hears(/Remove countdown/, (ctx) => {
+    let keyboards = []
+    countdowns.forEach((countdown, i) => {
+        keyboards.push([countdown.name + ", " + countdown.date])
+    })
+
+    ctx.reply(
+        "Which countdown do you want to delete?",
+        Markup.keyboard(keyboards).resize()
+    );
+    step = "Remove countdown"
+});
+
+bot.hears(/Enable daily reminders/, (ctx) => {
+    ctx.reply("hello there");
+});
+
+bot.hears(/Options/, (ctx) => {
+    ctx.reply("hello there");
+});
+
+bot.hears(/Change language/, (ctx) => {
+    ctx.reply("hello there");
+});
+
+bot.hears(/About/, (ctx) => {
+    ctx.reply("hello there");
 });
 
 bot.on(message("text"), (ctx) => {
@@ -100,7 +131,7 @@ bot.on(message("text"), (ctx) => {
         } else if (delta < -MS_PER_DAY) {
             result = `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
         } else {
-            result = "🎉 IT'S TODAY!";
+            result = "IT'S TODAY!";
         }
 
         ctx.reply(
@@ -112,32 +143,154 @@ bot.on(message("text"), (ctx) => {
         // cleanup
         step = "";
         ctdn = {};
+        return;
+    }
+
+    if (step === "Choose countdown") {
+        selectedCountdown = ctx.message.text.split(",")[0];
+        ctx.reply(
+            "What do you want to change?",
+            Markup.keyboard([
+                ["Edit name"],
+                ["Edit date"],
+                ["🔙 Cancel"]
+            ]).resize()
+        );
+        step = "Edit name or date"
+        return;
+    }
+
+    if (step === "Edit name or date") {
+        const userChoice = ctx.message.text;
+        if (userChoice === "Edit name") {
+            ctx.reply("What do you want to change the name to?")
+            step = "Set name"
+            return;
+        }
+        else if (userChoice === "Edit date") {
+            ctx.reply(`What do you want to change the date to? Send send me the date (YYYY-MM-DD), e.g. ${new Date().toISOString().slice(0, 10)}`)
+            step = "Set date"
+            return;
+        }
+        return;
+
+    }
+
+    if (step === "Set name") {
+        const newName = ctx.message.text;
+        countdowns.forEach((countdown, i) => {
+            if (countdown.name === selectedCountdown) {
+                countdowns[i].name = newName
+                ctdn.date = countdowns[i].date
+            }
+        })
+
+        const target = Date.parse(ctdn.date);
+        const delta = target - Date.now();
+        const MS_PER_DAY = 86400000;
+
+        let result;
+        if (delta > 0) {
+            result = `${Math.ceil(delta / MS_PER_DAY)} days left`;
+        } else if (delta < -MS_PER_DAY) {
+            result = `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
+        } else {
+            result = "IT'S TODAY!";
+        }
+        ctx.reply(
+            `${newName}\n(${ctdn.date})\n${result}`,
+            Markup.keyboard([
+                ["⏰ Show me my countdowns"],
+                ["➕ Add countdown"],
+                ["✏️ Edit countdown"],
+                ["❌ Remove countdown"],
+                ["☑️ Enable daily reminders"],
+                ["🛠 Options"],
+                ["🇬🇧 Change language"],
+                ["ℹ️ About"]
+            ]).resize()
+        );
+        step = ""
+        selectedCountdown = ""
+        ctdn = {}
+        return;
+    }
+
+    if (step === "Set date") {
+        const newDate = ctx.message.text;
+        const target = Date.parse(newDate);
+        if (isNaN(target)) {
+            ctx.reply("❌ Invalid date. Use YYYY-MM-DD");
+            return;
+        }
+
+        countdowns.forEach((countdown, i) => {
+            if (countdown.name === selectedCountdown) {
+                countdowns[i].date = newDate
+                ctdn.name = countdowns[i].name
+            }
+        })
+
+        const delta = target - Date.now();
+        const MS_PER_DAY = 86400000;
+
+        let result;
+        if (delta > 0) {
+            result = `${Math.ceil(delta / MS_PER_DAY)} days left`;
+        } else if (delta < -MS_PER_DAY) {
+            result = `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
+        } else {
+            result = "IT'S TODAY!";
+        }
+        ctx.reply(
+            `${ctdn.name}\n(${newDate})\n${result}`,
+            Markup.keyboard([
+                ["⏰ Show me my countdowns"],
+                ["➕ Add countdown"],
+                ["✏️ Edit countdown"],
+                ["❌ Remove countdown"],
+                ["☑️ Enable daily reminders"],
+                ["🛠 Options"],
+                ["🇬🇧 Change language"],
+                ["ℹ️ About"]
+            ]).resize()
+        );
+
+        step = ""
+        selectedCountdown = ""
+        ctdn = {}
+        return;
+    }
+
+    if (step === "Remove countdown") {
+        selectedCountdown = ctx.message.text.split(",")[0]
+        const newCountdowns = []
+        countdowns.forEach((countdown, i) => {
+            if (countdown.name !== selectedCountdown) {
+                newCountdowns.push(countdown)
+            }
+        })
+        countdowns = newCountdowns;
+        ctx.reply(
+            "Countdown was deleted",
+            Markup.keyboard([
+                ["⏰ Show me my countdowns"],
+                ["➕ Add countdown"],
+                ["✏️ Edit countdown"],
+                ["❌ Remove countdown"],
+                ["☑️ Enable daily reminders"],
+                ["🛠 Options"],
+                ["🇬🇧 Change language"],
+                ["ℹ️ About"]
+            ]).resize()
+        );
+
+        step = ""
+        selectedCountdown = ""
+        ctdn = {}
+        return;
     }
 });
 
-
-bot.hears(/Edit countdown/, (ctx) => {
-    ctx.reply("hello there");
-});
-
-bot.hears(/Remove countdown/, (ctx) => {
-    ctx.reply("hello there");
-});
-
-bot.hears(/Enable daily reminders/, (ctx) => {
-    ctx.reply("hello there");
-});
-
-bot.hears(/Options/, (ctx) => {
-    ctx.reply("hello there");
-});
-
-bot.hears(/Change language/, (ctx) => {
-    ctx.reply("hello there");
-});
-
-bot.hears(/About/, (ctx) => {
-    ctx.reply("hello there");
-});
 
 bot.launch();
