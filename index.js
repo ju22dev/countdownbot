@@ -1,7 +1,7 @@
 import { Telegraf, Markup, session } from "telegraf";
 import { message } from "telegraf/filters";
 import dotenv from "dotenv";
-import prisma from '../src/prismaClient.js'
+import prisma from './src/prismaClient.js'
 
 dotenv.config();
 
