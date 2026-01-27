@@ -1,6 +1,7 @@
 import { Telegraf, Markup, session } from "telegraf";
 import { message } from "telegraf/filters";
 import dotenv from "dotenv";
+import prisma from './prismaClient.js'
 
 dotenv.config();
 
@@ -16,7 +17,20 @@ let step = "";
 let ctdn = {};
 let selectedCountdown = ""
 
-bot.start((ctx) => {
+bot.start(async (ctx) => {
+
+    try {
+        const user = await prisma.user.create({
+            data: {
+                username: ctx.chat.username || ctx.chat.first_name,
+                chatId: ctx.chat.id.toString()
+            }
+
+        })
+    } catch (err) {
+        console.log(err.message)
+    }
+
     const welcome = `Hi ${ctx.chat.first_name}! I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
     ctx.reply(
         welcome,
@@ -34,9 +48,21 @@ bot.start((ctx) => {
     console.log(ctx.message.text)
 })
 
-bot.hears(/Show me my countdowns/, (ctx) => {
+bot.hears(/Show me my countdowns/, async (ctx) => {
+    let userData;
+    try {
+        const user = await prisma.user.findMany({
+            include: { countdowns: true },
+            where: { chatId: ctx.chat.id.toString() }
+        })
+
+        userData = user[0].countdowns
+
+    } catch (e) {
+        console.log(e.message)
+    }
     let countdownMsg = ""
-    countdowns.forEach((cntdn, i) => {
+    userData.forEach((cntdn, i) => {
         let delta = Date.parse(cntdn.date) - Date.now()
         const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
@@ -51,10 +77,15 @@ bot.hears(/Show me my countdowns/, (ctx) => {
         }
         countdownMsg += `${cntdn.name}\n(${cntdn.date}) \n${delta}\n\n`
     })
+    if (countdownMsg === "" ) {
+        ctx.reply("You don't have any countdown.")
+        return;
+    }
     ctx.reply(countdownMsg);
 });
 
 bot.hears(/Add countdown/, (ctx) => {
+
     step = "Add Name"
     ctx.reply("Send me the name of your countdown:");
 });
@@ -101,7 +132,7 @@ bot.hears(/About/, (ctx) => {
     ctx.reply("hello there");
 });
 
-bot.on(message("text"), (ctx) => {
+bot.on(message("text"), async (ctx) => {
 
     if (step === "Add Name") {
         ctdn.name = ctx.message.text;
@@ -124,7 +155,20 @@ bot.on(message("text"), (ctx) => {
 
         const delta = target - Date.now();
         const MS_PER_DAY = 86400000;
+        try {
 
+            await prisma.countdowns.create({
+                data: {
+                    name: ctdn.name,
+                    date: dateStr,
+                    user: {
+                        connect: { chatId: ctx.chat.id.toString() }
+                    }
+                }
+            })
+        } catch (e) {
+            console.log(e.message)
+        }
         let result;
         if (delta > 0) {
             result = `${Math.ceil(delta / MS_PER_DAY)} days left`;
