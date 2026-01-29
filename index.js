@@ -3,7 +3,6 @@ import { message } from "telegraf/filters";
 import dotenv from "dotenv";
 import prisma from './src/prismaClient.js'
 import { bold, italic, fmt } from "telegraf/format";
-
 dotenv.config();
 
 const token = process.env.BOT_TOKEN
@@ -28,9 +27,12 @@ bot.start(async (ctx) => {
         console.log(err.message)
     }
 
-    const welcome = `Hi ${ctx.chat.first_name}! I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
+    const welcome = `I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
     ctx.reply(
-        welcome,
+        fmt(
+            bold(`Hi ${ctx.chat.first_name}! \n`),
+            welcome
+        ),
         Markup.keyboard([
             ["⏰ Show me my countdowns"],
             ["➕ Add countdown"],
@@ -65,7 +67,11 @@ bot.hears(/Show me my countdowns/, async (ctx) => {
         console.log(e.message)
         return;
     }
-    let countdownMsg = ""
+    if (userData.length === 0) {
+        ctx.reply("You don't have any countdown.")
+        return;
+    }
+    let countdownMsg = []
     userData.forEach((cntdn, i) => {
         let delta = Date.parse(cntdn.date) - Date.now()
         const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -79,13 +85,10 @@ bot.hears(/Show me my countdowns/, async (ctx) => {
         } else {
             delta = "IT'S TODAY!"
         }
-        countdownMsg += `${cntdn.name}\n(${cntdn.date}) \n${delta}\n\n`
+        countdownMsg.push(bold(`${cntdn.name}\n`), italic(`(${cntdn.date})\n`), delta, "\n\n")
     })
-    if (countdownMsg === "") {
-        ctx.reply("You don't have any countdown.")
-        return;
-    }
-    ctx.reply(countdownMsg);
+    
+    ctx.reply(fmt(countdownMsg));
 });
 
 bot.hears(/Add countdown/, (ctx) => {
