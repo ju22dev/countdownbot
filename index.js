@@ -2,6 +2,7 @@ import { Telegraf, Markup, session } from "telegraf";
 import { message } from "telegraf/filters";
 import dotenv from "dotenv";
 import prisma from './src/prismaClient.js'
+import { bold, italic, fmt } from "telegraf/format";
 
 dotenv.config();
 
@@ -48,7 +49,13 @@ bot.hears(/Show me my countdowns/, async (ctx) => {
     let userData;
     try {
         const user = await prisma.user.findMany({
-            include: { countdowns: true },
+            include: {
+                countdowns: {
+                    orderBy: {
+                        date: 'asc',
+                    },
+                }
+            },
             where: { chatId: ctx.chat.id.toString() }
         })
 
@@ -92,8 +99,17 @@ bot.hears(/Edit countdown/, async (ctx) => {
     let userData;
     try {
         const user = await prisma.user.findMany({
-            include: { countdowns: true },
-            where: { chatId: ctx.chat.id.toString() }
+            include: {
+                countdowns: {
+                    orderBy: {
+                        date: 'asc',
+                    },
+                }
+            },
+            where: { chatId: ctx.chat.id.toString() },
+            orderBy: {
+                date: 'asc',
+            },
         })
 
         userData = user[0].countdowns
@@ -118,8 +134,17 @@ bot.hears(/Remove countdown/, async (ctx) => {
     let userData;
     try {
         const user = await prisma.user.findMany({
-            include: { countdowns: true },
-            where: { chatId: ctx.chat.id.toString() }
+            include: {
+                countdowns: {
+                    orderBy: {
+                        date: 'asc',
+                    },
+                }
+            },
+            where: { chatId: ctx.chat.id.toString() },
+            orderBy: {
+                date: 'asc',
+            },
         })
 
         userData = user[0].countdowns
@@ -140,7 +165,7 @@ bot.hears(/Remove countdown/, async (ctx) => {
 });
 
 bot.hears(/Enable daily reminders/, (ctx) => {
-    ctx.reply("hello there");
+    ctx.reply(fmt(bold("Hello"), italic("there")));
 });
 
 bot.hears(/Options/, (ctx) => {
@@ -244,7 +269,6 @@ bot.on(message("text"), async (ctx) => {
 
     if (step === "Set name") {
         const newName = ctx.message.text;
-
         try {
             await prisma.countdowns.updateMany({
                 where: {
@@ -261,8 +285,21 @@ bot.on(message("text"), async (ctx) => {
         } catch (e) {
             console.log(e.message)
         }
+        let updatedCountdown;
+        try {
+            updatedCountdown = await prisma.countdowns.findMany({
+                where: {
+                    name: newName,
+                    user: {
+                        chatId: ctx.chat.id.toString()
+                    }
+                }
+            })
+        } catch (e) {
+            console.log(e.message)
+        }
 
-        const target = Date.parse(ctdn.date);
+        const target = Date.parse(updatedCountdown[0].date);
         const delta = target - Date.now();
         const MS_PER_DAY = 86400000;
 
@@ -275,7 +312,7 @@ bot.on(message("text"), async (ctx) => {
             result = "IT'S TODAY!";
         }
         ctx.reply(
-            `${newName}\n(${ctdn.date})\n${result}`,
+            `${newName}\n(${updatedCountdown[0].date})\n${result}`,
             Markup.keyboard([
                 ["⏰ Show me my countdowns"],
                 ["➕ Add countdown"],
@@ -329,7 +366,7 @@ bot.on(message("text"), async (ctx) => {
             result = "IT'S TODAY!";
         }
         ctx.reply(
-            `${ctdn.name}\n(${newDate})\n${result}`,
+            `${selectedCountdown}\n(${newDate})\n${result}`,
             Markup.keyboard([
                 ["⏰ Show me my countdowns"],
                 ["➕ Add countdown"],
