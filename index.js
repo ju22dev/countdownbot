@@ -8,10 +8,6 @@ dotenv.config();
 const token = process.env.BOT_TOKEN
 const bot = new Telegraf(token)
 bot.use(session());
-let countdowns = [
-    { "name": "Chelsea", "date": "2026-01-25" },
-    { "name": "Galatasaray", "date": "2026-01-30" }
-]
 
 let step = "";
 let ctdn = {};
@@ -60,6 +56,7 @@ bot.hears(/Show me my countdowns/, async (ctx) => {
 
     } catch (e) {
         console.log(e.message)
+        return;
     }
     let countdownMsg = ""
     userData.forEach((cntdn, i) => {
@@ -77,7 +74,7 @@ bot.hears(/Show me my countdowns/, async (ctx) => {
         }
         countdownMsg += `${cntdn.name}\n(${cntdn.date}) \n${delta}\n\n`
     })
-    if (countdownMsg === "" ) {
+    if (countdownMsg === "") {
         ctx.reply("You don't have any countdown.")
         return;
     }
@@ -90,9 +87,22 @@ bot.hears(/Add countdown/, (ctx) => {
     ctx.reply("Send me the name of your countdown:");
 });
 
-bot.hears(/Edit countdown/, (ctx) => {
+bot.hears(/Edit countdown/, async (ctx) => {
     let keyboards = []
-    countdowns.forEach((countdown, i) => {
+    let userData;
+    try {
+        const user = await prisma.user.findMany({
+            include: { countdowns: true },
+            where: { chatId: ctx.chat.id.toString() }
+        })
+
+        userData = user[0].countdowns
+
+    } catch (e) {
+        console.log(e.message)
+        return;
+    }
+    userData.forEach((countdown, i) => {
         keyboards.push([countdown.name + ", " + countdown.date])
     })
 
@@ -103,9 +113,22 @@ bot.hears(/Edit countdown/, (ctx) => {
     step = "Choose countdown"
 });
 
-bot.hears(/Remove countdown/, (ctx) => {
+bot.hears(/Remove countdown/, async (ctx) => {
     let keyboards = []
-    countdowns.forEach((countdown, i) => {
+    let userData;
+    try {
+        const user = await prisma.user.findMany({
+            include: { countdowns: true },
+            where: { chatId: ctx.chat.id.toString() }
+        })
+
+        userData = user[0].countdowns
+
+    } catch (e) {
+        console.log(e.message)
+        return;
+    }
+    userData.forEach((countdown, i) => {
         keyboards.push([countdown.name + ", " + countdown.date])
     })
 
@@ -168,6 +191,7 @@ bot.on(message("text"), async (ctx) => {
             })
         } catch (e) {
             console.log(e.message)
+            return;
         }
         let result;
         if (delta > 0) {
@@ -181,8 +205,6 @@ bot.on(message("text"), async (ctx) => {
         ctx.reply(
             `${ctdn.name}\n(${dateStr})\n${result}`
         );
-
-        countdowns.push(ctdn);
 
         // cleanup
         step = "";
@@ -222,12 +244,23 @@ bot.on(message("text"), async (ctx) => {
 
     if (step === "Set name") {
         const newName = ctx.message.text;
-        countdowns.forEach((countdown, i) => {
-            if (countdown.name === selectedCountdown) {
-                countdowns[i].name = newName
-                ctdn.date = countdowns[i].date
-            }
-        })
+
+        try {
+            await prisma.countdowns.updateMany({
+                where: {
+                    name: selectedCountdown,
+                    user: {
+                        chatId: ctx.chat.id.toString(),
+                    },
+                },
+                data: {
+                    name: newName,
+                },
+            })
+
+        } catch (e) {
+            console.log(e.message)
+        }
 
         const target = Date.parse(ctdn.date);
         const delta = target - Date.now();
@@ -267,13 +300,22 @@ bot.on(message("text"), async (ctx) => {
             ctx.reply("❌ Invalid date. Use YYYY-MM-DD");
             return;
         }
-
-        countdowns.forEach((countdown, i) => {
-            if (countdown.name === selectedCountdown) {
-                countdowns[i].date = newDate
-                ctdn.name = countdowns[i].name
-            }
-        })
+        try {
+            await prisma.countdowns.updateMany({
+                where: {
+                    name: selectedCountdown,
+                    user: {
+                        chatId: ctx.chat.id.toString(),
+                    },
+                },
+                data: {
+                    date: newDate,
+                },
+            })
+        } catch (e) {
+            console.log(e.message)
+            return;
+        }
 
         const delta = target - Date.now();
         const MS_PER_DAY = 86400000;
@@ -308,13 +350,19 @@ bot.on(message("text"), async (ctx) => {
 
     if (step === "Remove countdown") {
         selectedCountdown = ctx.message.text.split(",")[0]
-        const newCountdowns = []
-        countdowns.forEach((countdown, i) => {
-            if (countdown.name !== selectedCountdown) {
-                newCountdowns.push(countdown)
-            }
-        })
-        countdowns = newCountdowns;
+        try {
+            await prisma.countdowns.deleteMany({
+                where: {
+                    name: selectedCountdown,
+                    user: {
+                        chatId: ctx.chat.id.toString()
+                    }
+                }
+            })
+        } catch (e) {
+            console.log(e.message)
+            return;
+        }
         ctx.reply(
             "Countdown was deleted",
             Markup.keyboard([
