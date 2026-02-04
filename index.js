@@ -23,28 +23,32 @@ bot.start(async (ctx) => {
             }
 
         })
+        const welcome = `I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
+        ctx.reply(
+            fmt(
+                bold(`Hi ${ctx.chat.first_name}! \n`),
+                welcome
+            ),
+            Markup.keyboard([
+                ["⏰ Show me my countdowns"],
+                ["➕ Add countdown"],
+                ["✏️ Edit countdown"],
+                ["❌ Remove countdown"],
+                ["☑️ Enable daily reminders"],
+                ["🛠 Options"],
+                ["🇬🇧 Change language"],
+                ["ℹ️ About"]
+            ]).resize()
+        );
+        console.log(ctx.message.text)
+        step = ""
+        selectedCountdown = ""
+        ctdn = {}
     } catch (err) {
         console.log(err.message)
     }
 
-    const welcome = `I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
-    ctx.reply(
-        fmt(
-            bold(`Hi ${ctx.chat.first_name}! \n`),
-            welcome
-        ),
-        Markup.keyboard([
-            ["⏰ Show me my countdowns"],
-            ["➕ Add countdown"],
-            ["✏️ Edit countdown"],
-            ["❌ Remove countdown"],
-            ["☑️ Enable daily reminders"],
-            ["🛠 Options"],
-            ["🇬🇧 Change language"],
-            ["ℹ️ About"]
-        ]).resize()
-    );
-    console.log(ctx.message.text)
+
 })
 
 bot.hears(/Show me my countdowns/, async (ctx) => {
@@ -62,33 +66,37 @@ bot.hears(/Show me my countdowns/, async (ctx) => {
         })
 
         userData = user[0].countdowns
+        if (userData.length === 0) {
+            ctx.reply("You don't have any countdown.")
+            return;
+        }
+        let countdownMsg = []
+        userData.forEach((cntdn, i) => {
+            let delta = Date.parse(cntdn.date) - Date.now()
+            const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+            if (delta > 0) {
+                const days = Math.ceil(Math.abs(delta) / MS_PER_DAY);
+                delta = `${days} days left`
+            } else if (delta < -1000 * 60 * 60 * 24) {
+                const days = Math.floor(Math.abs(delta) / MS_PER_DAY);
+                delta = `${days} days ago`
+            } else {
+                delta = "IT'S TODAY!"
+            }
+            countdownMsg.push(bold(`${cntdn.name}\n`), italic(`(${cntdn.date})\n`), delta, "\n\n")
+        })
+
+        ctx.reply(fmt(countdownMsg));
+        step = ""
+        selectedCountdown = ""
+        ctdn = {}
 
     } catch (e) {
         console.log(e.message)
         return;
     }
-    if (userData.length === 0) {
-        ctx.reply("You don't have any countdown.")
-        return;
-    }
-    let countdownMsg = []
-    userData.forEach((cntdn, i) => {
-        let delta = Date.parse(cntdn.date) - Date.now()
-        const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-        if (delta > 0) {
-            const days = Math.ceil(Math.abs(delta) / MS_PER_DAY);
-            delta = `${days} days left`
-        } else if (delta < -1000 * 60 * 60 * 24) {
-            const days = Math.floor(Math.abs(delta) / MS_PER_DAY);
-            delta = `${days} days ago`
-        } else {
-            delta = "IT'S TODAY!"
-        }
-        countdownMsg.push(bold(`${cntdn.name}\n`), italic(`(${cntdn.date})\n`), delta, "\n\n")
-    })
-    
-    ctx.reply(fmt(countdownMsg));
 });
 
 bot.hears(/Add countdown/, (ctx) => {
