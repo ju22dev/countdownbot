@@ -23,30 +23,31 @@ bot.start(async (ctx) => {
             }
 
         })
-        const welcome = `I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
-        ctx.reply(
-            fmt(
-                bold(`Hi ${ctx.chat.first_name}! \n`),
-                welcome
-            ),
-            Markup.keyboard([
-                ["⏰ Show me my countdowns"],
-                ["➕ Add countdown"],
-                ["✏️ Edit countdown"],
-                ["❌ Remove countdown"],
-                ["☑️ Enable daily reminders"],
-                ["🛠 Options"],
-                ["🇬🇧 Change language"],
-                ["ℹ️ About"]
-            ]).resize()
-        );
-        console.log(ctx.message.text)
-        step = ""
-        selectedCountdown = ""
-        ctdn = {}
+
     } catch (err) {
         console.log(err.message)
     }
+    const welcome = `I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
+    ctx.reply(
+        fmt(
+            bold(`Hi ${ctx.chat.first_name}! \n`),
+            welcome
+        ),
+        Markup.keyboard([
+            ["⏰ Show me my countdowns"],
+            ["➕ Add countdown"],
+            ["✏️ Edit countdown"],
+            ["❌ Remove countdown"],
+            ["☑️ Enable daily reminders"],
+            ["🛠 Options"],
+            ["🇬🇧 Change language"],
+            ["ℹ️ About"]
+        ]).resize()
+    );
+    console.log(ctx.message.text)
+    step = ""
+    selectedCountdown = ""
+    ctdn = {}
 
 
 })
@@ -109,21 +110,19 @@ bot.hears(/Edit countdown/, async (ctx) => {
     let keyboards = []
     let userData;
     try {
-        const user = await prisma.user.findMany({
-            include: {
-                countdowns: {
-                    orderBy: {
-                        date: 'asc',
-                    },
-                }
+        const countdowns = await prisma.countdowns.findMany({
+            where: {
+                user: {
+                    chatId: ctx.chat.id.toString(),
+                },
             },
-            where: { chatId: ctx.chat.id.toString() },
             orderBy: {
                 date: 'asc',
             },
         })
 
-        userData = user[0].countdowns
+
+        userData = countdowns
 
     } catch (e) {
         console.log(e.message)
@@ -144,21 +143,19 @@ bot.hears(/Remove countdown/, async (ctx) => {
     let keyboards = []
     let userData;
     try {
-        const user = await prisma.user.findMany({
-            include: {
-                countdowns: {
-                    orderBy: {
-                        date: 'asc',
-                    },
-                }
+        const countdowns = await prisma.countdowns.findMany({
+            where: {
+                user: {
+                    chatId: ctx.chat.id.toString(),
+                },
             },
-            where: { chatId: ctx.chat.id.toString() },
             orderBy: {
                 date: 'asc',
             },
         })
 
-        userData = user[0].countdowns
+
+        userData = countdowns
 
     } catch (e) {
         console.log(e.message)
