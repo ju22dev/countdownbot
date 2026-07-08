@@ -1,433 +1,365 @@
-import { Telegraf, Markup, session } from "telegraf";
+import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
-import dotenv from "dotenv";
-import prisma from './src/prismaClient.js'
 import { bold, italic, fmt } from "telegraf/format";
-dotenv.config();
+import prisma from "../src/prismaClient.js";
 
-const token = process.env.BOT_TOKEN
-const bot = new Telegraf(token)
-bot.use(session());
+const token = process.env.BOT_TOKEN;
+const bot = new Telegraf(token);
 
-let step = "";
-let ctdn = {};
-let selectedCountdown = ""
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const mainMenu = Markup.keyboard([
+  ["⏰ Show me my countdowns"],
+  ["➕ Add countdown"],
+  ["✏️ Edit countdown"],
+  ["❌ Remove countdown"],
+  ["☑️ Enable daily reminders"],
+  ["🛠 Options"],
+  ["🇬🇧 Change language"],
+  ["ℹ️ About"],
+]).resize();
+
+// ---------- helpers ----------
+
+function formatDelta(dateStr) {
+  const target = Date.parse(dateStr);
+  const delta = target - Date.now();
+  if (delta > 0) {
+    return `${Math.ceil(delta / MS_PER_DAY)} days left`;
+  } else if (delta < -MS_PER_DAY) {
+    return `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
+  }
+  return "IT'S TODAY!";
+}
+
+// Loads (or creates) the user row so we always have somewhere to store state.
+async function getOrCreateUser(ctx) {
+  const chatId = ctx.chat.id.toString();
+  let user = await prisma.user.findUnique({ where: { chatId } });
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        username: ctx.chat.username || ctx.chat.first_name || `user_${chatId}`,
+        chatId,
+      },
+    });
+  }
+  return user;
+}
+
+async function setState(chatId, data) {
+  await prisma.user.update({
+    where: { chatId },
+    data,
+  });
+}
+
+async function resetState(chatId) {
+  await setState(chatId, { step: "", tempName: null, selectedCountdown: null });
+}
+
+// ---------- command / button handlers ----------
 
 bot.start(async (ctx) => {
+  try {
+    await getOrCreateUser(ctx);
+  } catch (err) {
+    console.log(err.message);
+  }
 
-    try {
-        const user = await prisma.user.create({
-            data: {
-                username: ctx.chat.username || ctx.chat.first_name,
-                chatId: ctx.chat.id.toString()
-            }
+  const welcome = `I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
+  await ctx.reply(fmt(bold(`Hi ${ctx.chat.first_name}! \n`), welcome), mainMenu);
 
-        })
-
-    } catch (err) {
-        console.log(err.message)
-    }
-    const welcome = `I'm Countdown Bot and I'll help you with counting down to things that matter. Just click one of the buttons below 😎`;
-    ctx.reply(
-        fmt(
-            bold(`Hi ${ctx.chat.first_name}! \n`),
-            welcome
-        ),
-        Markup.keyboard([
-            ["⏰ Show me my countdowns"],
-            ["➕ Add countdown"],
-            ["✏️ Edit countdown"],
-            ["❌ Remove countdown"],
-            ["☑️ Enable daily reminders"],
-            ["🛠 Options"],
-            ["🇬🇧 Change language"],
-            ["ℹ️ About"]
-        ]).resize()
-    );
-    console.log(ctx.message.text)
-    step = ""
-    selectedCountdown = ""
-    ctdn = {}
-
-
-})
-
-bot.hears(/Show me my countdowns/, async (ctx) => {
-    let userData;
-    try {
-        const user = await prisma.user.findMany({
-            include: {
-                countdowns: {
-                    orderBy: {
-                        date: 'asc',
-                    },
-                }
-            },
-            where: { chatId: ctx.chat.id.toString() }
-        })
-
-        userData = user[0].countdowns
-        if (userData.length === 0) {
-            ctx.reply("You don't have any countdown.")
-            return;
-        }
-        let countdownMsg = []
-        userData.forEach((cntdn, i) => {
-            let delta = Date.parse(cntdn.date) - Date.now()
-            const MS_PER_DAY = 1000 * 60 * 60 * 24;
-
-            if (delta > 0) {
-                const days = Math.ceil(Math.abs(delta) / MS_PER_DAY);
-                delta = `${days} days left`
-            } else if (delta < -1000 * 60 * 60 * 24) {
-                const days = Math.floor(Math.abs(delta) / MS_PER_DAY);
-                delta = `${days} days ago`
-            } else {
-                delta = "IT'S TODAY!"
-            }
-            countdownMsg.push(bold(`${cntdn.name}\n`), italic(`(${cntdn.date})\n`), delta, "\n\n")
-        })
-
-        ctx.reply(fmt(countdownMsg));
-        step = ""
-        selectedCountdown = ""
-        ctdn = {}
-
-    } catch (e) {
-        console.log(e.message)
-        return;
-    }
-
+  await resetState(ctx.chat.id.toString());
 });
 
-bot.hears(/Add countdown/, (ctx) => {
+bot.hears(/Show me my countdowns/, async (ctx) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { chatId: ctx.chat.id.toString() },
+      include: { countdowns: { orderBy: { date: "asc" } } },
+    });
 
-    step = "Add Name"
-    ctx.reply("Send me the name of your countdown:");
+    const userData = user?.countdowns ?? [];
+    if (userData.length === 0) {
+      await ctx.reply("You don't have any countdown.");
+      return;
+    }
+
+    const countdownMsg = [];
+    const pastCtdns = [];
+
+    userData.forEach((cntdn) => {
+      const delta = Date.parse(cntdn.date) - Date.now();
+      const line = [bold(`${cntdn.name}\n`), italic(`(${cntdn.date})\n`)];
+      if (delta > 0) {
+        line.push(`${Math.ceil(Math.abs(delta) / MS_PER_DAY)} days left`, "\n\n");
+        countdownMsg.push(...line);
+      } else if (delta < -MS_PER_DAY) {
+        line.push(`${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`, "\n\n");
+        pastCtdns.push(...line);
+      } else {
+        line.push("IT'S TODAY!", "\n\n");
+        countdownMsg.push(...line);
+      }
+    });
+
+    countdownMsg.push("___________________\n");
+    countdownMsg.push(...pastCtdns);
+
+    await ctx.reply(fmt(countdownMsg));
+    await resetState(ctx.chat.id.toString());
+  } catch (e) {
+    console.log(e.message);
+  }
+});
+
+bot.hears(/Add countdown/, async (ctx) => {
+  await setState(ctx.chat.id.toString(), { step: "Add Name" });
+  await ctx.reply("Send me the name of your countdown:");
 });
 
 bot.hears(/Edit countdown/, async (ctx) => {
-    let keyboards = []
-    let userData;
-    try {
-        const countdowns = await prisma.countdowns.findMany({
-            where: {
-                user: {
-                    chatId: ctx.chat.id.toString(),
-                },
-            },
-            orderBy: {
-                date: 'asc',
-            },
-        })
+  try {
+    const countdowns = await prisma.countdowns.findMany({
+      where: { user: { chatId: ctx.chat.id.toString() } },
+      orderBy: { date: "asc" },
+    });
 
-
-        userData = countdowns
-
-    } catch (e) {
-        console.log(e.message)
-        return;
+    if (countdowns.length === 0) {
+      await ctx.reply("You don't have any countdown to edit.");
+      return;
     }
-    userData.forEach((countdown, i) => {
-        keyboards.push([countdown.name + ", " + countdown.date])
-    })
 
-    ctx.reply(
-        "Which countdown do you want to edit?",
-        Markup.keyboard(keyboards).resize()
+    const keyboard = countdowns.map((c) => [`${c.name}, ${c.date}`]);
+
+    await ctx.reply(
+      "Which countdown do you want to edit?",
+      Markup.keyboard(keyboard).resize()
     );
-    step = "Choose countdown"
+    await setState(ctx.chat.id.toString(), { step: "Choose countdown" });
+  } catch (e) {
+    console.log(e.message);
+  }
 });
 
 bot.hears(/Remove countdown/, async (ctx) => {
-    let keyboards = []
-    let userData;
-    try {
-        const countdowns = await prisma.countdowns.findMany({
-            where: {
-                user: {
-                    chatId: ctx.chat.id.toString(),
-                },
-            },
-            orderBy: {
-                date: 'asc',
-            },
-        })
+  try {
+    const countdowns = await prisma.countdowns.findMany({
+      where: { user: { chatId: ctx.chat.id.toString() } },
+      orderBy: { date: "asc" },
+    });
 
-
-        userData = countdowns
-
-    } catch (e) {
-        console.log(e.message)
-        return;
+    if (countdowns.length === 0) {
+      await ctx.reply("You don't have any countdown to remove.");
+      return;
     }
-    userData.forEach((countdown, i) => {
-        keyboards.push([countdown.name + ", " + countdown.date])
-    })
 
-    ctx.reply(
-        "Which countdown do you want to delete?",
-        Markup.keyboard(keyboards).resize()
+    const keyboard = countdowns.map((c) => [`${c.name}, ${c.date}`]);
+
+    await ctx.reply(
+      "Which countdown do you want to delete?",
+      Markup.keyboard(keyboard).resize()
     );
-    step = "Remove countdown"
+    await setState(ctx.chat.id.toString(), { step: "Remove countdown" });
+  } catch (e) {
+    console.log(e.message);
+  }
 });
 
-bot.hears(/Enable daily reminders/, (ctx) => {
-    ctx.reply(fmt(bold("Hello"), italic("there")));
+bot.hears(/Enable daily reminders/, async (ctx) => {
+  await ctx.reply(fmt(bold("Hello"), italic("there")));
 });
 
-bot.hears(/Options/, (ctx) => {
-    ctx.reply("hello there");
+bot.hears(/Options/, async (ctx) => {
+  await ctx.reply("hello there");
 });
 
-bot.hears(/Change language/, (ctx) => {
-    ctx.reply("hello there");
+bot.hears(/Change language/, async (ctx) => {
+  await ctx.reply("hello there");
 });
 
-bot.hears(/About/, (ctx) => {
-    ctx.reply("hello there");
+bot.hears(/About/, async (ctx) => {
+  await ctx.reply("hello there");
 });
+
+// ---------- multi-step text flows (Add / Edit / Remove) ----------
 
 bot.on(message("text"), async (ctx) => {
+  const chatId = ctx.chat.id.toString();
 
-    if (step === "Add Name") {
-        ctdn.name = ctx.message.text;
-        step = "Add Date";
+  let user;
+  try {
+    user = await getOrCreateUser(ctx);
+  } catch (e) {
+    console.log(e.message);
+    return;
+  }
 
-        ctx.reply(
-            `Now send me the date (YYYY-MM-DD), e.g. ${new Date().toISOString().slice(0, 10)}`
-        );
-        return;
+  const step = user.step || "";
+
+  // --- Add countdown flow ---
+
+  if (step === "Add Name") {
+    await setState(chatId, { step: "Add Date", tempName: ctx.message.text });
+    await ctx.reply(
+      `Now send me the date (YYYY-MM-DD), e.g. ${new Date().toISOString().slice(0, 10)}`
+    );
+    return;
+  }
+
+  if (step === "Add Date") {
+    const dateStr = ctx.message.text;
+    if (isNaN(Date.parse(dateStr))) {
+      await ctx.reply("❌ Invalid date. Use YYYY-MM-DD");
+      return;
     }
 
-    if (step === "Add Date") {
-        const dateStr = ctx.message.text;
-        const target = Date.parse(dateStr);
-        if (isNaN(target)) {
-            ctx.reply("❌ Invalid date. Use YYYY-MM-DD");
-            return;
-        }
-        ctdn.date = dateStr;
-
-        const delta = target - Date.now();
-        const MS_PER_DAY = 86400000;
-        try {
-
-            await prisma.countdowns.create({
-                data: {
-                    name: ctdn.name,
-                    date: dateStr,
-                    user: {
-                        connect: { chatId: ctx.chat.id.toString() }
-                    }
-                }
-            })
-        } catch (e) {
-            console.log(e.message)
-            return;
-        }
-        let result;
-        if (delta > 0) {
-            result = `${Math.ceil(delta / MS_PER_DAY)} days left`;
-        } else if (delta < -MS_PER_DAY) {
-            result = `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
-        } else {
-            result = "IT'S TODAY!";
-        }
-
-        ctx.reply(
-            `${ctdn.name}\n(${dateStr})\n${result}`
-        );
-
-        // cleanup
-        step = "";
-        ctdn = {};
-        return;
+    const name = user.tempName;
+    try {
+      await prisma.countdowns.create({
+        data: {
+          name,
+          date: dateStr,
+          user: { connect: { chatId } },
+        },
+      });
+    } catch (e) {
+      console.log(e.message);
+      return;
     }
 
-    if (step === "Choose countdown") {
-        selectedCountdown = ctx.message.text.split(",")[0];
-        ctx.reply(
-            "What do you want to change?",
-            Markup.keyboard([
-                ["Edit name"],
-                ["Edit date"],
-                ["🔙 Cancel"]
-            ]).resize()
-        );
-        step = "Edit name or date"
-        return;
+    await ctx.reply(`${name}\n(${dateStr})\n${formatDelta(dateStr)}`, mainMenu);
+    await resetState(chatId);
+    return;
+  }
+
+  // --- Edit countdown flow ---
+
+  if (step === "Choose countdown") {
+    const selected = ctx.message.text.split(",")[0].trim();
+    await setState(chatId, { step: "Edit name or date", selectedCountdown: selected });
+    await ctx.reply(
+      "What do you want to change?",
+      Markup.keyboard([["Edit name"], ["Edit date"], ["🔙 Cancel"]]).resize()
+    );
+    return;
+  }
+
+  if (step === "Edit name or date") {
+    const choice = ctx.message.text;
+    if (choice === "Edit name") {
+      await setState(chatId, { step: "Set name" });
+      await ctx.reply("What do you want to change the name to?");
+      return;
+    }
+    if (choice === "Edit date") {
+      await setState(chatId, { step: "Set date" });
+      await ctx.reply(
+        `What do you want to change the date to? Send me the date (YYYY-MM-DD), e.g. ${new Date()
+          .toISOString()
+          .slice(0, 10)}`
+      );
+      return;
+    }
+    if (choice === "🔙 Cancel") {
+      await ctx.reply("Cancelled.", mainMenu);
+      await resetState(chatId);
+      return;
+    }
+    return;
+  }
+
+  if (step === "Set name") {
+    const newName = ctx.message.text;
+    const selected = user.selectedCountdown;
+
+    try {
+      await prisma.countdowns.updateMany({
+        where: { name: selected, user: { chatId } },
+        data: { name: newName },
+      });
+    } catch (e) {
+      console.log(e.message);
+      return;
     }
 
-    if (step === "Edit name or date") {
-        const userChoice = ctx.message.text;
-        if (userChoice === "Edit name") {
-            ctx.reply("What do you want to change the name to?")
-            step = "Set name"
-            return;
-        }
-        else if (userChoice === "Edit date") {
-            ctx.reply(`What do you want to change the date to? Send send me the date (YYYY-MM-DD), e.g. ${new Date().toISOString().slice(0, 10)}`)
-            step = "Set date"
-            return;
-        }
-        return;
-
+    let updated;
+    try {
+      updated = await prisma.countdowns.findFirst({
+        where: { name: newName, user: { chatId } },
+      });
+    } catch (e) {
+      console.log(e.message);
+      return;
     }
 
-    if (step === "Set name") {
-        const newName = ctx.message.text;
-        try {
-            await prisma.countdowns.updateMany({
-                where: {
-                    name: selectedCountdown,
-                    user: {
-                        chatId: ctx.chat.id.toString(),
-                    },
-                },
-                data: {
-                    name: newName,
-                },
-            })
+    await ctx.reply(
+      `${newName}\n(${updated.date})\n${formatDelta(updated.date)}`,
+      mainMenu
+    );
+    await resetState(chatId);
+    return;
+  }
 
-        } catch (e) {
-            console.log(e.message)
-        }
-        let updatedCountdown;
-        try {
-            updatedCountdown = await prisma.countdowns.findMany({
-                where: {
-                    name: newName,
-                    user: {
-                        chatId: ctx.chat.id.toString()
-                    }
-                }
-            })
-        } catch (e) {
-            console.log(e.message)
-        }
-
-        const target = Date.parse(updatedCountdown[0].date);
-        const delta = target - Date.now();
-        const MS_PER_DAY = 86400000;
-
-        let result;
-        if (delta > 0) {
-            result = `${Math.ceil(delta / MS_PER_DAY)} days left`;
-        } else if (delta < -MS_PER_DAY) {
-            result = `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
-        } else {
-            result = "IT'S TODAY!";
-        }
-        ctx.reply(
-            `${newName}\n(${updatedCountdown[0].date})\n${result}`,
-            Markup.keyboard([
-                ["⏰ Show me my countdowns"],
-                ["➕ Add countdown"],
-                ["✏️ Edit countdown"],
-                ["❌ Remove countdown"],
-                ["☑️ Enable daily reminders"],
-                ["🛠 Options"],
-                ["🇬🇧 Change language"],
-                ["ℹ️ About"]
-            ]).resize()
-        );
-        step = ""
-        selectedCountdown = ""
-        ctdn = {}
-        return;
+  if (step === "Set date") {
+    const newDate = ctx.message.text;
+    if (isNaN(Date.parse(newDate))) {
+      await ctx.reply("❌ Invalid date. Use YYYY-MM-DD");
+      return;
     }
 
-    if (step === "Set date") {
-        const newDate = ctx.message.text;
-        const target = Date.parse(newDate);
-        if (isNaN(target)) {
-            ctx.reply("❌ Invalid date. Use YYYY-MM-DD");
-            return;
-        }
-        try {
-            await prisma.countdowns.updateMany({
-                where: {
-                    name: selectedCountdown,
-                    user: {
-                        chatId: ctx.chat.id.toString(),
-                    },
-                },
-                data: {
-                    date: newDate,
-                },
-            })
-        } catch (e) {
-            console.log(e.message)
-            return;
-        }
-
-        const delta = target - Date.now();
-        const MS_PER_DAY = 86400000;
-
-        let result;
-        if (delta > 0) {
-            result = `${Math.ceil(delta / MS_PER_DAY)} days left`;
-        } else if (delta < -MS_PER_DAY) {
-            result = `${Math.floor(Math.abs(delta) / MS_PER_DAY)} days ago`;
-        } else {
-            result = "IT'S TODAY!";
-        }
-        ctx.reply(
-            `${selectedCountdown}\n(${newDate})\n${result}`,
-            Markup.keyboard([
-                ["⏰ Show me my countdowns"],
-                ["➕ Add countdown"],
-                ["✏️ Edit countdown"],
-                ["❌ Remove countdown"],
-                ["☑️ Enable daily reminders"],
-                ["🛠 Options"],
-                ["🇬🇧 Change language"],
-                ["ℹ️ About"]
-            ]).resize()
-        );
-
-        step = ""
-        selectedCountdown = ""
-        ctdn = {}
-        return;
+    const selected = user.selectedCountdown;
+    try {
+      await prisma.countdowns.updateMany({
+        where: { name: selected, user: { chatId } },
+        data: { date: newDate },
+      });
+    } catch (e) {
+      console.log(e.message);
+      return;
     }
 
-    if (step === "Remove countdown") {
-        selectedCountdown = ctx.message.text.split(",")[0]
-        try {
-            await prisma.countdowns.deleteMany({
-                where: {
-                    name: selectedCountdown,
-                    user: {
-                        chatId: ctx.chat.id.toString()
-                    }
-                }
-            })
-        } catch (e) {
-            console.log(e.message)
-            return;
-        }
-        ctx.reply(
-            "Countdown was deleted",
-            Markup.keyboard([
-                ["⏰ Show me my countdowns"],
-                ["➕ Add countdown"],
-                ["✏️ Edit countdown"],
-                ["❌ Remove countdown"],
-                ["☑️ Enable daily reminders"],
-                ["🛠 Options"],
-                ["🇬🇧 Change language"],
-                ["ℹ️ About"]
-            ]).resize()
-        );
+    await ctx.reply(`${selected}\n(${newDate})\n${formatDelta(newDate)}`, mainMenu);
+    await resetState(chatId);
+    return;
+  }
 
-        step = ""
-        selectedCountdown = ""
-        ctdn = {}
-        return;
+  // --- Remove countdown flow ---
+
+  if (step === "Remove countdown") {
+    const selected = ctx.message.text.split(",")[0].trim();
+    try {
+      await prisma.countdowns.deleteMany({
+        where: { name: selected, user: { chatId } },
+      });
+    } catch (e) {
+      console.log(e.message);
+      return;
     }
+
+    await ctx.reply("Countdown was deleted", mainMenu);
+    await resetState(chatId);
+    return;
+  }
 });
 
+// ---------- Vercel serverless entry point ----------
 
-bot.launch();
+export default async function handler(req, res) {
+  if (req.method === "POST") {
+    try {
+      await bot.handleUpdate(req.body, res);
+      if (!res.writableEnded) {
+        res.status(200).end();
+      }
+    } catch (e) {
+      console.error(e);
+      if (!res.writableEnded) {
+        res.status(500).end();
+      }
+    }
+  } else {
+    res.status(200).send("Bot is running");
+  }
+}
