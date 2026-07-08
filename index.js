@@ -1,7 +1,7 @@
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 import { bold, italic, fmt } from "telegraf/format";
-import prisma from "../src/prismaClient.js";
+import prisma from "./src/prismaClient.js";
 
 const token = process.env.BOT_TOKEN;
 const bot = new Telegraf(token);
