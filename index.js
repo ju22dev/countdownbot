@@ -346,20 +346,46 @@ bot.on(message("text"), async (ctx) => {
 
 // ---------- Vercel serverless entry point ----------
 
+// Reads and parses the raw request body ourselves — some Vercel runtimes
+// (notably plain ESM Node functions) don't auto-populate req.body.
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    if (req.body !== undefined && req.body !== null) {
+      // Already parsed (either an object, or a string/buffer we can parse).
+      if (typeof req.body === "object") return resolve(req.body);
+      try {
+        return resolve(JSON.parse(req.body));
+      } catch (e) {
+        return reject(e);
+      }
+    }
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method === "POST") {
     try {
-      await bot.handleUpdate(req.body, res);
-      if (!res.writableEnded) {
-        res.status(200).end();
-      }
+      const update = await readJsonBody(req);
+      await bot.handleUpdate(update);
+      res.statusCode = 200;
+      res.end("OK");
     } catch (e) {
       console.error(e);
-      if (!res.writableEnded) {
-        res.status(500).end();
-      }
+      res.statusCode = 500;
+      res.end("Error");
     }
   } else {
-    res.status(200).send("Bot is running");
+    res.statusCode = 200;
+    res.end("Bot is running");
   }
 }
